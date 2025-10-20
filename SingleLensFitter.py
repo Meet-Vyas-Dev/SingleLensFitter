@@ -54,9 +54,9 @@ class SingleLensFitter():
 
 		if reference_source is None:
 
-			self.reference_source = self.data.keys()[0]
+			self.reference_source = list(self.data.keys())[0]
 
-			print 'Using',self.reference_source,'as reference.'
+			print('Using',self.reference_source,'as reference.')
 
 		else:
 
@@ -66,10 +66,10 @@ class SingleLensFitter():
 
 			else:
 
-				self.reference_source = self.data.keys()[0]
+				self.reference_source = list(self.data.keys())[0]
 
-				print 'Warning:',reference_source,'is not a valid data source.'
-				print 'Using',self.reference_source,'as reference.'
+				print('Warning:',reference_source,'is not a valid data source.')
+				print('Using',self.reference_source,'as reference.')
 
 
 		self.parameter_labels = [r"$u_0$",r"$t_0$",r"$t_E$"]
@@ -179,8 +179,8 @@ class SingleLensFitter():
 		# Set up 2d Simpsons Rule matrix
 		n = self.finite_source_integration_subintervals
 		x = np.ones(n+1)
-		c2 = np.arange(n/2-1)*2 + 2
-		c4 = np.arange(n/2)*2 + 1
+		c2 = np.arange(n//2-1)*2 + 2
+		c4 = np.arange(n//2)*2 + 1
 		x[c2] = 2
 		x[c4] = 4
 		xx, yy = np.meshgrid(x,x)
@@ -234,7 +234,7 @@ class SingleLensFitter():
 		self.use_mixture_model = True
 		self.mixture_index = self.ndim
 
-		for site in self.data.keys():
+		for site in list(self.data.keys()):
 
 			self.p = np.hstack((self.p, self.mixture_default_params))
 			self.ndim += 3
@@ -260,7 +260,7 @@ class SingleLensFitter():
 
 		else:
 
-			for site in self.data.keys():
+			for site in list(self.data.keys()):
 
 				self.p = np.hstack((self.p, self.GP_default_params))
 				self.ndim += 2
@@ -272,7 +272,7 @@ class SingleLensFitter():
 	def lnprior_GP(self,GP_params):
 		params = ['ln_a','ln_tau']
 		for i, p in enumerate(params):
-			prange = eval('self.'+p+'_limits')
+			prange = getattr(self, p+'_limits')
 			if prange:
 				if GP_params[i] < prange[0] or GP_params[i] > prange[1]:
 					return -np.inf
@@ -283,7 +283,7 @@ class SingleLensFitter():
 	def lnprior_mixture(self,mixture_params):
 		params = ['P_b','V_b','Y_b']
 		for i, p in enumerate(params):
-			prange = eval('self.'+p+'_limits')
+			prange = getattr(self, p+'_limits')
 			if prange:
 				if mixture_params[i] < prange[0] or mixture_params[i] > prange[1]:
 					return -np.inf
@@ -294,9 +294,9 @@ class SingleLensFitter():
 	def lnprior_ulens(self):
 		params = ['u0','t0','tE']
 		for p in params:
-			prange = eval('self.'+p+'_limits')
+			prange = getattr(self, p+'_limits')
 			if prange:
-				param = eval('self.'+p)
+				param = getattr(self, p)
 				if param < prange[0] or param > prange[1]:
 					return -np.inf
 		return 0.0
@@ -348,7 +348,7 @@ class SingleLensFitter():
 		if self.use_mixture_model:
 
 			pi = self.mixture_index
-			for data_set_name in self.data.keys():
+			for data_set_name in list(self.data.keys()):
 
 				self.P_b[data_set_name] = p[pi]
 				self.V_b[data_set_name] = p[pi+1]
@@ -369,7 +369,7 @@ class SingleLensFitter():
 		
 			else:
 
-				for data_set_name in self.data.keys():
+				for data_set_name in list(self.data.keys()):
 
 					self.ln_a[data_set_name] = p[pi]
 					self.ln_tau[data_set_name] = p[pi+1]
@@ -391,7 +391,7 @@ class SingleLensFitter():
 
 		lnprob = 0.0
 
-		for data_set_name in self.data.keys():
+		for data_set_name in list(self.data.keys()):
 
 			t, y, yerr = self.data[data_set_name]
 			mag = self.magnification(t)
@@ -458,7 +458,7 @@ class SingleLensFitter():
 			if data_key in self.eigen_lightcurves:
 				eigs = self.eigen_lightcurves[data_key]
 				for i in range(eigs.shape[0]):
-					A = np.vstack((A,eigs[i,:]))
+					A = np.vstack((A,eigs[i,:].reshape(1,len(mag))))
 					n_params += 1
 
 		S = np.dot(A,np.dot(C_inv,A.T)).reshape(n_params,n_params)
@@ -495,7 +495,7 @@ class SingleLensFitter():
 			try:
 				a = linalg.solve(S,b)
 			except linalg.LinAlgError:
-				return (0,0), -np.inf
+				return None, -np.inf
 			D = y - np.dot(A.T,a)
 			chi2 = np.dot(D.T,np.dot(C_inv,D))
 
@@ -558,7 +558,7 @@ class SingleLensFitter():
 					uq = u[fs_points[q]]
 
 
- 					if  uq <= rho:
+					if  uq <= rho:
 
 						theta_1d = np.arange(n+1)*np.pi/n
 						theta = np.broadcast_to(theta_1d,(n+1,n+1)).T
@@ -595,7 +595,7 @@ class SingleLensFitter():
 					#A[fs_points[q]] = 2.0/(np.pi*rho**2) * (delta_theta/9.0) * np.sum(S*integrand*delta_r)
 					A[fs_points[q]] = np.sum(S*integrand*delta_r)/np.sum(S*r*delta_r)
 
- 					# if  uq <= 0.7*rho:
+					# if  uq <= 0.7*rho:
 						# print 'uq',uq
 						# print 'rho', rho
 						# print 'u1', u1
@@ -636,13 +636,13 @@ class SingleLensFitter():
 
 					else:
 
-						k = np.arange(1,n/2)
+						k = np.arange(1,n//2)
 						theta = 2.0*k*np.arcsin(rho/uq)/n
 						u1 = uq * np.cos(theta) - np.sqrt(rho**2 - uq**2 * np.sin(theta)**2)
 						u2 = uq * np.cos(theta) + np.sqrt(rho**2 - uq**2 * np.sin(theta)**2)
 						f1 = u2 * np.sqrt(u2**2 + 4.0) - u1 * np.sqrt(u1**2 + 4.0)
 
-						k = np.arange(1,n/2+1)
+						k = np.arange(1,n//2+1)
 						theta = (2.0*k-1.0)*np.arcsin(rho/uq)/n
 						u1 = uq * np.cos(theta) - np.sqrt(rho**2 - uq**2 * np.sin(theta)**2)
 						u2 = uq * np.cos(theta) + np.sqrt(rho**2 - uq**2 * np.sin(theta)**2)
@@ -678,14 +678,14 @@ class SingleLensFitter():
 			raise Exception('Error in SingleLensFitter.fit(): No initial_parameters found.')
 			return None
 
-		print 'Initial parameters:', self.p
-		print 'ln Prob = ',self.lnprob(self.p)
+		print('Initial parameters:', self.p)
+		print('ln Prob = ',self.lnprob(self.p))
 
 		result = minimize(self.neglnprob,self.p,method=method)
 		self.p = result.x
 
-		print 'Final parameters:', self.p
-		print 'ln Prob = ',self.lnprob(self.p)
+		print('Final parameters:', self.p)
+		print('ln Prob = ',self.lnprob(self.p))
 
 
 
@@ -749,24 +749,24 @@ class SingleLensFitter():
 			raise Exception('Error in SingleLensFitter.fit(): No initial_parameters found.')
 			return None
 
-		print 'Initial parameters:', self.p
-		print 'ln Prob = ',self.lnprob(self.p)
+		print('Initial parameters:', self.p)
+		print('ln Prob = ',self.lnprob(self.p))
 
 		ndim = self.ndim
 
 		if optimize_first:
 
-			print 'Optimising...'
+			print('Optimising...')
 
 			minimize(self.neglnprob,self.p,method='Nelder-Mead')
 
-			print 'Optimized parameters:', self.p
-			print 'ln Prob = ',self.lnprob(self.p)
+			print('Optimized parameters:', self.p)
+			print('ln Prob = ',self.lnprob(self.p))
 
-		print ndim, len(self.p), self.nwalkers
+		print(ndim, len(self.p), self.nwalkers)
 
 		self.state = [self.p + 1e-8 * np.random.randn(ndim) \
-						for i in xrange(self.nwalkers)]
+						for i in range(self.nwalkers)]
 
 		sampler = emcee.EnsembleSampler(self.nwalkers, ndim, self.lnprob)
 
@@ -778,14 +778,14 @@ class SingleLensFitter():
 
 		self.count = 0
 
-		print 'ndim, walkers, nsteps, max_iterations:', ndim, self.nwalkers, self.nsteps, self.max_burnin_iterations
+		print('ndim, walkers, nsteps, max_iterations:', ndim, self.nwalkers, self.nsteps, self.max_burnin_iterations)
 
 		while not converged and iteration < self.max_burnin_iterations:
 
 			self.state, lnp , _ = sampler.run_mcmc(self.state, self.nsteps)
 
 			iteration += 1
-			print 'iteration', iteration, 'completed'
+			print('iteration', iteration, 'completed')
 
 			kmax = np.argmax(sampler.flatlnprobability)
 			self.p = sampler.flatchain[kmax,:]
@@ -795,31 +795,6 @@ class SingleLensFitter():
 			if self.make_plots:
 
 				self.plot_chain(sampler,suffix='-burnin.png')
-
-				# ind = 3
-
-				# if self.use_finite_source:
-				# 	ind += 1
-
-				# npar = 0
-				# if self.use_mixture_model:
-				# 	npar += 3
-				# if self.use_gaussian_process_model:
-				# 	npar += 2
-
-				# if npar > 0:
-
-				# 	for data_set_name in self.data.keys():
-					
-				# 		self.plot_chain(sampler,index=range(ind,npar+ind),  \
-				# 				suffix='-burnin-'+data_set_name+'.png', \
-				# 				labels=self.parameter_labels[ind:ind+npar])
-
-				# 		ind += npar
-
-				# 		if self.gaussian_process_common:
-				# 			ind -= 2
-
 				self.plot_combined_lightcurves()
 
 			converged = self.emcee_has_converged(sampler,n_steps=self.nsteps)
@@ -835,7 +810,8 @@ class SingleLensFitter():
 		params = map(lambda v: (v[1], v[2]-v[1], v[1]-v[0]), \
 								zip(*np.percentile(self.samples[:,:], \
 								[16, 50, 84], axis=0)))
-
+		
+		params = list(params)
 		self.p = np.asarray(params)[:,0]
 
 		self.u0 = self.p[0]
@@ -851,46 +827,14 @@ class SingleLensFitter():
 		if self.make_plots:
 
 			self.plot_chain(sampler,suffix='-final.png')
-
-			# ind = 3
-
-			# if self.use_finite_source:
-			# 	ind += 1
-
-			# if npar > 0:
-
-			# 	for data_set_name in self.data.keys():
-				
-			# 		self.plot_chain(sampler,index=range(ind,npar+ind),  \
-			# 				suffix='-final-'+data_set_name+'.png', \
-			# 				labels=self.parameter_labels[ind:ind+npar])
-			# 			if not self.gaussian_process_common:
-			# 				ind += npar
-			# 		ind += npar
-
 			self.plot_lightcurves()
 			self.plot_chain_corner()
 
-		print 'Results:'
-		# print 'u0', params[0]
-		# print 't0', params[1]
-		# print 'tE', params[2]
-		# if self.use_finite_source:
-		# 	print 'rho', params[self.finite_source_index]
-
+		print('Results:')
 		with open(self.plotprefix+'.fit_results','w') as fid:
 			for i in range(self.ndim):
 				fid.write('%s %f %f %f\n'%(self.parameter_labels[i],params[i][0],params[i][1],params[i][2]))
-				print '%s %f %f %f\n'%(self.parameter_labels[i],params[i][0],params[i][1],params[i][2])
-			# fid.write('u0 %f %f %f\n'%(params[0][0],params[0][1],params[0][2]))
-			# fid.write('t0 %f %f %f\n'%(params[1][0],params[1][1],params[1][2]))
-			# fid.write('tE %f %f %f\n'%(params[2][0],params[2][1],params[2][2]))
-			# if self.use_finite_source:
-			# 	pi = self.finite_source_index
-			# 	fid.write('rho %f %f %f\n'%(params[pi][0],params[pi][1],params[pi][2]))
-			# if self.use_limb_darkening:
-			# 	pi = self.limb_darkening_index
-			# 	fid.write('gamma %f %f %f\n'%(params[pi][0],params[pi][1],params[pi][2]))
+				print('%s %f %f %f\n'%(self.parameter_labels[i],params[i][0],params[i][1],params[i][2]))
 
 
 		np.save(self.plotprefix+'-state-production',np.asarray(self.state))
@@ -982,7 +926,7 @@ class SingleLensFitter():
 		if t_range is None:
 			t_min = self.p[1]-4*self.p[2]
 			t_max = self.p[1]+4*self.p[2]
-			for site in self.data.keys():
+			for site in list(self.data.keys()):
 				if np.min(self.data[site][0]) < t_min:
 					t_min = np.min(self.data[site][0])
 				if np.max(self.data[site][0]) > t_max:
@@ -1001,7 +945,7 @@ class SingleLensFitter():
 		a0 = {}
 		a1 = {}
 
-		for site in self.data.keys():
+		for site in list(self.data.keys()):
 
 			t, y, yerr = self.data[site]
 			mag = self.magnification(t)
@@ -1009,7 +953,7 @@ class SingleLensFitter():
 			a0[site] = a[1]
 			a1[site] = a[0]
 
-		for k, site in enumerate(self.data.keys()):
+		for k, site in enumerate(list(self.data.keys())):
 
 			scaled_dflux = a0[self.reference_source]*((self.data[site][1] - a1[site])/a0[site]) + a1[self.reference_source]
 			scaled_dflux_err = a0[self.reference_source]*((self.data[site][1] + self.data[site][2] - a1[site])/a0[site]) + \
@@ -1057,7 +1001,7 @@ class SingleLensFitter():
 
 		ax1 = plt.subplot(gs[1],sharex=ax0)
 
-		for k, site in enumerate(self.data.keys()):
+		for k, site in enumerate(list(self.data.keys())):
 	
 			A = self.magnification(self.data[site][0])
 
@@ -1113,7 +1057,7 @@ class SingleLensFitter():
 		xmax = self.initial_parameters[1]+2*self.initial_parameters[2]
 
 		n_data = len(self.data)
-		for i, data_set_name in enumerate(self.data.keys()):
+		for i, data_set_name in enumerate(list(self.data.keys())):
 
 			t, y, yerr = self.data[data_set_name]
 			#c=next(colour)
@@ -1200,4 +1144,4 @@ class SingleLensFitter():
 
 
 
-			
+
