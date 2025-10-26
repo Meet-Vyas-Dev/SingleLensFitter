@@ -83,6 +83,11 @@ class SingleLensFitter():
 		self.marginalise_linear_parameters = True
 		self.fit_blended = True
 
+		# --- NEW ---
+		# Option to use lightweight linear fit for simple models
+		self.use_fast_linear_fit = False 
+		# --- END NEW ---
+
 		self.u0_limits = (0.0,1.3)
 		self.tE_limits = (0.5,200)
 		self.t0_limits = None
@@ -396,6 +401,21 @@ class SingleLensFitter():
 			t, y, yerr = self.data[data_set_name]
 			mag = self.magnification(t)
 
+			# --- NEW LOGIC ---
+			# Check if we can use the fast fit.
+			# The fast fit is only for the simple 2-param PSPL model.
+			# It is incompatible with GP, eigen_lcs, variability, etc.
+			can_use_fast_fit = (
+				self.use_fast_linear_fit and
+				not self.use_gaussian_process_model and
+				(self.eigen_lightcurves is None or data_set_name not in self.eigen_lightcurves) and
+				not self.use_source_variability and
+				not self.use_blend_variability and
+				not self.use_mixture_model and
+				self.fit_blended # Fast fit assumes blended fit
+			)
+			# --- END NEW LOGIC ---
+
 			if self.use_gaussian_process_model:
 
 				if self.gaussian_process_common:
@@ -411,19 +431,55 @@ class SingleLensFitter():
 				gp = george.GP(a * kernels.ExpKernel(tau))
 				gp.compute(t, yerr)
 				self.cov[data_set_name] = gp.get_matrix(t)
-				result, lp = self.linear_fit(data_set_name,mag)
+				
+				# GP is incompatible with fast fit, so must call full
+				result, lp = self.linear_fit_full(data_set_name,mag)
+				
 				model = self.compute_lightcurve(data_set_name,t)
 				lnprob = gp.lnlikelihood(y-model)
 
 			else:
-				result, lp = self.linear_fit(data_set_name,mag)
+				# --- MODIFIED ---
+				if can_use_fast_fit:
+					result, lp = self.linear_fit_fast(data_set_name, mag)
+				else:
+					result, lp = self.linear_fit_full(data_set_name,mag)
 				lnprob += lp
+				# --- END MODIFIED ---
 
 		return lnprob
 
 
-	def linear_fit(self,data_key,mag):
+	def linear_fit_fast(self, data_key, mag):
+		"""
+		Lightweight linear fit approximation for quick tests.
+		Avoids full matrix inversion; uses weighted least squares.
+		This method is ONLY compatible with a simple blended model
+		(fit_blended=True) and is INCOMPATIBLE with GP,
+		eigen lightcurves, variability, or mixture models.
+		"""
+		t, y, yerr = self.data[data_key]
+		w = 1.0 / (yerr ** 2)
+		A = np.vstack((np.ones_like(mag), mag))
+		Aw = A * w
+		Sw = Aw @ A.T
+		bw = Aw @ y
+		try:
+			a = np.linalg.solve(Sw, bw)
+		except np.linalg.LinAlgError:
+			return (0, 0), -np.inf
 
+		model = a[0] + a[1] * mag
+		chi2 = np.sum(((y - model) / yerr) ** 2)
+		lnprob = -0.5 * chi2
+		return a, lnprob
+
+
+	def linear_fit_full(self,data_key,mag):
+		"""
+		Full linear fit using matrix inversion (Cholesky decomposition).
+		This method handles all physics options (GP, variability, etc.)
+		"""
 		t, y, yerr = self.data[data_key]
 
 		if self.use_gaussian_process_model:
@@ -893,7 +949,27 @@ class SingleLensFitter():
 	def compute_lightcurve(self,data_key, x, params=None):
 
 		t, _, _ = self.data[data_key]
-		coeffs, _ = self.linear_fit(data_key,self.magnification(t,params))
+		
+		# --- START MODIFIED LOGIC ---
+		mag_t = self.magnification(t,params)
+		
+		# Check if we can use the fast fit.
+		can_use_fast_fit = (
+			self.use_fast_linear_fit and
+			not self.use_gaussian_process_model and # a bit redundant here, but safe
+			(self.eigen_lightcurves is None or data_key not in self.eigen_lightcurves) and
+			not self.use_source_variability and
+			not self.use_blend_variability and
+			not self.use_mixture_model and
+			self.fit_blended 
+		)
+		
+		if can_use_fast_fit:
+			coeffs, _ = self.linear_fit_fast(data_key, mag_t)
+		else:
+			coeffs, _ = self.linear_fit_full(data_key, mag_t)
+		# --- END MODIFIED LOGIC ---
+
 
 		if self.fit_blended:
 
@@ -948,8 +1024,26 @@ class SingleLensFitter():
 		for site in list(self.data.keys()):
 
 			t, y, yerr = self.data[site]
+			
+			# --- START MODIFIED LOGIC (to call correct linear fit) ---
 			mag = self.magnification(t)
-			a, lnprob = self.linear_fit(site, mag)
+			
+			can_use_fast_fit = (
+				self.use_fast_linear_fit and
+				not self.use_gaussian_process_model and
+				(self.eigen_lightcurves is None or site not in self.eigen_lightcurves) and
+				not self.use_source_variability and
+				not self.use_blend_variability and
+				not self.use_mixture_model and
+				self.fit_blended
+			)
+
+			if can_use_fast_fit:
+				a, lnprob = self.linear_fit_fast(site, mag)
+			else:
+				a, lnprob = self.linear_fit_full(site, mag)
+			# --- END MODIFIED LOGIC ---
+				
 			a0[site] = a[1]
 			a1[site] = a[0]
 
@@ -1072,7 +1166,24 @@ class SingleLensFitter():
 			y_cond = y
 			if self.eigen_lightcurves is not None:
 				if data_set_name in self.eigen_lightcurves:
-					coeffs, _ = self.linear_fit(data_set_name,self.magnification(t))
+					
+					# --- START MODIFIED LOGIC (to call correct linear fit) ---
+					mag = self.magnification(t)
+					can_use_fast_fit = (
+						self.use_fast_linear_fit and
+						not self.use_gaussian_process_model and
+						(self.eigen_lightcurves is None or data_set_name not in self.eigen_lightcurves) and
+						not self.use_source_variability and
+						not self.use_blend_variability and
+						not self.use_mixture_model and
+						self.fit_blended
+					)
+					if can_use_fast_fit:
+						coeffs, _ = self.linear_fit_fast(data_set_name, mag)
+					else:
+						coeffs, _ = self.linear_fit_full(data_set_name, mag)
+					# --- END MODIFIED LOGIC ---
+						
 					ci = 1
 					if self.fit_blended:
 						ci = 2
@@ -1106,9 +1217,13 @@ class SingleLensFitter():
 					a, tau = np.exp(s[ind::ind+2])
 					gp = george.GP(a * kernels.ExpKernel(tau))
 					gp.compute(t, yerr)
+					
+					# --- START MODIFIED LOGIC (to call correct linear fit) ---
+					# We must use linear_fit_full when GP is active
 					self.cov[data_set_name] = gp.get_matrix(t)
 					modelt = self.compute_lightcurve(data_set_name,t,params=s)
 					modelx = self.compute_lightcurve(data_set_name,x,params=s)
+					# --- END MODIFIED LOGIC ---
 
 					# Compute the prediction conditioned on the observations
 					# and plot it.
@@ -1136,12 +1251,3 @@ class SingleLensFitter():
 					show_titles=True, title_args={"fontsize": 12})
 
 		figure.savefig(self.plotprefix+'-pdist.png')
-
-
-
-
-
-
-
-
-
